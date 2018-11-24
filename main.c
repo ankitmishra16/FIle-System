@@ -18,6 +18,6 @@ main(int argc, char *argv[])
     char *path = argv[1];
 
     FS_Boot(path);
-    //FS_Sync();
+    FS_Sync();
     return 0;
 }
