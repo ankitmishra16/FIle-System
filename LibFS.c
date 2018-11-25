@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <math.h>
 #include "LibFS.h"
 #include "LibDisk.h"
 
@@ -75,6 +76,22 @@ static open_file_t open_files[MAX_OPEN_FILES];
 
 /**********************START OF HELPER FUNCTIONS***********************/
 
+
+int ipow(int base, int exp) {
+    int result = 1;
+    for (;;) //unconditional for-loop
+    {
+        if (exp & 1)
+            result *= base;
+        exp >>= 1;
+        if (!exp)
+            break;
+        base *= base;
+    }
+    return result;
+}
+
+
 // Initializing inode bitmap and sector bitmap
 //for inode 1st bit is 1 (for root) others = 0
 // for sector bitmap 255 bits arre 1 (for superblock(1), inode bitmap(1),
@@ -110,7 +127,6 @@ static void initialize_bitmap() {
 //spanned over 'num' number of sectors, and total size of bitmap 'nbits'
 static int first_unused_bit( int start, int num, int nbytes )
 {
-    nbits*=8;
     char buf[ SECTOR_SIZE ];
     int sector = 0;
     int bytes_left = nbytes, check = SECTOR_SIZE;
@@ -137,10 +153,10 @@ static int first_unused_bit( int start, int num, int nbytes )
                 while( mask != 0 )
                 {
                     loc++;
-                    mask>>1;
+                    mask = mask>>1;
                 }
 
-                mask = pow(2, loc - 1);
+                mask = ipow(2, loc - 1);
 
                 buf[i] = buf[i] | mask ;
 
