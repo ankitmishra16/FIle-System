@@ -313,7 +313,7 @@ int add_inode(int type, int parent_inode, char* file)
     char buf[ SECTOR_SIZE ];//buffer to read the sector where new inode/ parent inode lies
     if(Disk_Read( new_inode_sector, buf ) < 0 ) return -1;//read the sector on which new inode lies
 
-    int sector_num = new_inode_sector - INODE_BITMAP_START_SECTOR;//sector from start on which new inode lies
+    int sector_num = new_inode_sector - INODE_TABLE_START_SECTOR;//sector from start on which new inode lies
     int offset = child_inode_number - sector_num * INODES_PER_SECTOR ;//going to byte where new inode to be stored
 
     inode_t* child_inode = (inode_t*)(buf + offset*sizeof(inode_t)); 
