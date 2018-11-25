@@ -109,7 +109,6 @@ static void initialize_bitmap() {
 //spanned over 'num' number of sectors, and total size of bitmap 'nbits'
 static int first_unused_bit( int start, int num, int nbytes )
 {
-    nbits*=8;
     char buf[ SECTOR_SIZE ];
     int sector = 0;
     int bytes_left = nbytes, check = SECTOR_SIZE;
@@ -136,7 +135,7 @@ static int first_unused_bit( int start, int num, int nbytes )
                 while( mask != 0 )
                 {
                     loc++;
-                    mask>>1;
+                    mask = mask>>1;
                 }
 
                 mask = pow(2, loc - 1);
