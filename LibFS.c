@@ -76,7 +76,7 @@ static open_file_t open_files[MAX_OPEN_FILES];
 
 /**********************START OF HELPER FUNCTIONS***********************/
 
-
+//to calculate power, used in first_unused_bitmap()
 int ipow(int base, int exp) {
     int result = 1;
     for (;;) //unconditional for-loop
@@ -294,6 +294,84 @@ static int follow_path(char* path, int* last_inode, char* last_fname)
         return parent;
     }
 
+}
+
+// add a new file or directory (determined by 'type') of given name
+// 'file' under parent directory represented by 'parent_inode'
+int add_inode(int type, int parent_inode, char* file)
+{
+    int child_inode_number = first_unused_bit( INODE_BITMAP_START_SECTOR, INODE_BITMAP_SECTORS, INODE_BITMAP_SIZE );
+
+    if( child_inode_number < 0 )
+    {
+        printf("___ inode is not available");
+        return -1;
+    }
+    printf("___ child inode is available with inode number %d \n", child_inode_number );
+
+    int new_inode_sector = INODE_TABLE_START_SECTOR + child_inode_number/INODES_PER_SECTOR;//to calculate sector number on which it lie
+    char buf[ SECTOR_SIZE ];//buffer to read the sector where new inode/ parent inode lies
+    if(Disk_Read( new_inode_sector, buf ) < 0 ) return -1;//read the sector on which new inode lies
+
+    int sector_num = new_inode_sector - INODE_BITMAP_START_SECTOR;//sector from start on which new inode lies
+    int offset = child_inode_number - sector_num * INODES_PER_SECTOR ;//going to byte where new inode to be stored
+
+    inode_t* child_inode = (inode_t*)(buf + offset*sizeof(inode_t)); 
+
+    memset(child_inode, 0, sizeof(inode_t) );
+    child_inode->type = type;
+    if( Disk_Write( new_inode_sector, buf) < 0 ) return -1;//writing back the new inode's entry
+
+    // Retrieving parents inode to make entry
+
+    memset( buf, 0, SECTOR_SIZE );//clearing buffer buf to reuse it
+    int parent_inode_sector = INODE_TABLE_START_SECTOR + parent_inode/INODES_PER_SECTOR;//to calculate sector number on which the parent inode lie
+    if(Disk_Read( parent_inode_sector, buf ) < 0 ) return -1;//read the sector on which new inode lies    
+
+    sector_num = parent_inode_sector - INODE_BITMAP_START_SECTOR;//number of sectors from start on which parent inode lies
+    offset = parent_inode_number - sector_num * INODES_PER_SECTOR ;//going to byte where parent inode to be stored
+
+    inode_t* parent = (inode_t*)(buf + offset*sizeof(inode_t));
+
+    if( parent->type != 1 ) return -2;//Parent is not directory
+
+        //Calculations for  dirent_t of  directory
+    int number_of_entries = parent->size;
+    int sector_sub = number_of_entries/DIRENTS_PER_SECTOR;
+    char dirent_buf[ SECTOR_SIZE ];
+
+    if( ( sector_sub * DIRENTS_PER_SECTOR) == number_of_entries )// New sector is needed as rest sectors are full
+    {
+        if( sector_sub == 30) return -1;//Parent directory is full with its capacity to have subdirectories/files
+
+        int new_sector = first_unused_bit( SECTOR_BITMAP_START_SECTOR, SECTOR_BITMAP_SECTORS, SECTOR_BITMAP_SIZE );//get the sector number for new sector
+        parent->data[sector_sub] = new_sector ;//making entry in parent's inode for new sector
+        memset( dirent_buf, 0, SECTOR_SIZE );//filling dirent buffer with 0, because we had created neww
+                                            //new secctor, and we will write dirent buffer on that sector
+                                            // so it should be clear, unless it may write some garbage 
+        printf("___ New sector is created,with sector number %d\n", new_sector);
+    }
+    else
+    {
+        if( Disk_Read( parent->data[sector_sub], dirent_buf) < 0 ) return -1;
+
+        printf("___ Sector loaded with sector number %d, for group number \n", parent->data[sector_sub], sector_sub );
+    }
+
+    int offset_sub = parent->size - sector_sub * DIRENTS_PER_SECTOR;//to calculate where the new entry to be made
+
+    dirent_t sub = ( dirent_t*)( dirent_buf + offset_sub * sizeof(dirent_t) );//tofetch  out the dirent structure from dirent buf
+
+    sub->inode = child_inode_number;//to make inode entry in dirent structure
+    strncpy( sub->fname, file, MAX_NAME );//to make file_name entry in dirent structre
+
+    if( Disk_Write( parent->data[sector_sub], dirent_buf) < 0 ) return -1;
+
+    parent->size++;
+
+    if( Disk_Write( parent_inode_sector, buf) < 0 ) return -1;
+
+    return 0;
 }
 
 
