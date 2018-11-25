@@ -121,7 +121,7 @@ inode_t* get_inode(int child_inode) {
 
 //get_child_inode will return inode number of 'fname' file/directory, whhich should be
 // in parent_inode i.e., it should be sub-directory or file, if not return -1, 
-static int get_child_inode(int parent_inode, char* fname/*, int *cached_inode_sector, char* cached_inode_buffer*/)
+static int get_child_inode(int parent_inode, char* fname)
 {
     int child_inode;//to return the inode number of child node
 
@@ -132,7 +132,7 @@ static int get_child_inode(int parent_inode, char* fname/*, int *cached_inode_se
     Disk_Read( parent_sector, buf );//to read the sector of parent's inode
 
     inode_t* parent = (inode_t*)( buf + ( parent_offset*sizeof(inode_t) ) );
-    printf("___ load parent inode: %d (size=%d, type=%d)\n", parent_inode, parent->size, parent->type);
+    printf("___ load parent inode: parent_inode address %p, %d (size=%d, type=%d)\n",parent, parent_inode, parent->size, parent->type);
 
     if( parent->type == 0 )//0 represents file, and 1 represents directory, in parent->type
     {
@@ -152,7 +152,7 @@ static int get_child_inode(int parent_inode, char* fname/*, int *cached_inode_se
             {
                 if( i > parent_entries )
                     break;
-                if(((dirent_t*)buf)[i].fname == fname )
+                if(!strcmp(((dirent_t*)buf)[i].fname, fname))
                 {
                     child_inode = ((dirent_t*)buf)[i].inode;
                     printf("___ found child inode %d", child_inode);
@@ -180,7 +180,7 @@ static int follow_path(char* path, int* last_inode, char* last_fname)
     return -1;
   }
   if(path[0] != '/') {
-    dprintf("___ '%s' not absolute path\n", path);
+    printf("___ '%s' not absolute path\n", path);
     return -1;
   }
 
