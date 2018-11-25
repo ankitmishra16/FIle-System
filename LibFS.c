@@ -313,7 +313,7 @@ int add_inode(int type, int parent_inode, char* file)
     char buf[ SECTOR_SIZE ];//buffer to read the sector where new inode/ parent inode lies
     if(Disk_Read( new_inode_sector, buf ) < 0 ) return -1;//read the sector on which new inode lies
 
-    int sector_num = new_inode_sector - INODE_BITMAP_START_SECTOR;//sector from start on which new inode lies
+    int sector_num = new_inode_sector - INODE_TABLE_START_SECTOR;//sector from start on which new inode lies
     int offset = child_inode_number - sector_num * INODES_PER_SECTOR ;//going to byte where new inode to be stored
 
     inode_t* child_inode = (inode_t*)(buf + offset*sizeof(inode_t)); 
@@ -372,6 +372,35 @@ int add_inode(int type, int parent_inode, char* file)
     if( Disk_Write( parent_inode_sector, buf) < 0 ) return -1;
 
     return 0;
+}
+
+// used by both File_Create() and Dir_Create(); type=0 is file, type=1
+// is directory
+int create_file_or_directory(int type, char* pathname)
+{
+  int child_inode;
+  char last_fname[MAX_NAME];
+  int parent_inode = follow_path(pathname, &child_inode, last_fname);
+  if(parent_inode >= 0) {
+    if(child_inode >= 0) {
+      dprintf("... file/directory '%s' already exists, failed to create\n", pathname);
+      osErrno = E_CREATE;
+      return -1;
+    } else {
+      if(add_inode(type, parent_inode, last_fname) >= 0) {
+    dprintf("... successfully created file/directory: '%s'\n", pathname);
+    return 0;
+      } else {
+    dprintf("... error: something wrong with adding child inode\n");
+    osErrno = E_CREATE;
+    return -1;
+      }
+    }
+  } else {
+    dprintf("... error: something wrong with the file/path: '%s'\n", pathname);
+    osErrno = E_CREATE;
+    return -1;
+  }
 }
 
 
@@ -512,8 +541,9 @@ int FS_Sync()
 int
 File_Create(char *file)
 {
-    printf("FS_Create\n");
-    return 0;
+    
+    dprintf("File_Create('%s'):\n", file);
+    return create_file_or_directory(0, file);
 }
 
 int File_Open(char *file)
