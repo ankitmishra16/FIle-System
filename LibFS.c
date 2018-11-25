@@ -177,57 +177,52 @@ static int get_child_inode(int parent_inode, char* fname)
 // through last_inode argument and name of file/directory thourgh last name
 static int follow_path(char* path, int* last_inode, char* last_fname)
 {
-if(!path) {
-    printf("___ invalid path\n");
-    return -1;
-  }
-  if(path[0] != '/') {
-    dprintf("___ '%s' not absolute path\n", path);
-    return -1;
-  }
-
-  //to remove first '/' from path
-  char target[ MAX_PATH ];
-  strncpy( target, path + 1, MAX_PATH - 1 );
-  target[ MAX_PATH - 1] = '\0';
-
-  //to initialize parent and child inode number, initially root i.e., 0
-  int parent = -1, child = 0;   
-
-  char *follow;//to access parts of path, as a/b/c/d.txt then a,b,c will be accessed seperately by follow
-
-  while( (follow = strsep( target, "/")) != NULL )
-  {
-
-    if( *follow == "\0") continue;//to check if the whole path is accessed,now strsep will return NULL so loop will break
-
-    if( illegal_filename( follow ) )//chceking if path-part is legal
-    {
-        printf("___ Illegal filename\n");
+    if(!path) {
+        printf("___ invalid path\n");
         return -1;
-    } 
-
-    if( child < 0 )
-    {
-        printf("___ parent inode can't be established");
+    }
+    if(path[0] != '/') {
+        dprintf("___ '%s' not absolute path\n", path);
         return -1;
     }
 
-    parent = child;//pushing the child inode to parent, to go further in child's directory, so making it parent
-    child_inode = get_child_inode(parent, follow);
+    //to remove first '/' from path
+    char tgt[ MAX_PATH ];
+    strncpy( tgt, path + 1, MAX_PATH - 1 );
+    tgt[ MAX_PATH - 1] = '\0';
+    printf("___ path copied\n");
+    char *target = tgt;
+    //to initialize parent and child inode number, initially root i.e., 0
+    int parent = -1, child = 0;
 
-    if(last_fname) strcpy(last_fname, follow);
-  }
+    char *follow;//to access parts of path, as a/b/c/d.txt then a,b,c will be accessed seperately by follow
+    while( (follow = strsep( &target, "/")) != NULL )
+    {
+        if( *follow == '\0') continue;//to check if the whole path is accessed,now strsep will return NULL so loop will break
 
-  if( child < -1 ) return -1;//some error happend
-  else
-  {
-    if( parent == -1 && child == 0 ) parent = 0;
+        if( illegal_filename( follow ) )//chceking if path-part is legal
+        {
+            return -1;
+        }
+        if( child < 0 )
+        {
+            return -1;
+        }
 
-    *last_inode = child;
+        parent = child;//pushing the child inode to parent, to go further in child's directory, so making it parent
+        child = get_child_inode(parent, follow);
+        if(last_fname) strcpy(last_fname, follow);
+    }
 
-    return parent;
-  }
+    if( child < -1 ) return -1;//some error happend
+    else
+    {
+        if( parent == -1 && child == 0 ) parent = 0;
+
+        *last_inode = child;
+
+        return parent;
+    }
 
 }
 
