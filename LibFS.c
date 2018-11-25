@@ -588,18 +588,44 @@ File_Write(int fd, void *buffer, int size)
     return 0;
 }
 
-int
-File_Seek(int fd, int offset)
+int File_Seek(int fd, int offset)
 {
     printf("FS_Seek\n");
-    return 0;
+    bool is_open = false;
+    for(int i = 0; i < MAX_OPEN_FILES; i++) {
+        if(open_files[i].inode == open_files[fd].inode) {
+            if(open_files[fd].size < offset) {
+                osErrno = E_SEEK_OUT_OF_BOUNDS;
+                return -1;
+            }
+            open_files[fd].pos = offset; //position updated
+            return open_files[fd].pos;
+        }
+    }
+    osErrno = E_BAD_FD;
+    return -1;
 }
 
-int
-File_Close(int fd)
+int File_Close(int fd)
 {
     printf("FS_Close\n");
+    //bound check
+    if (fd < 0 || fd > MAX_OPEN_FILES) {
+        printf("___ file descriptor '%d' out of bound\n", fd);
+        osErrno = E_BAD_FD;
+        return -1;
+    }
+    //check if opened or not
+    if (open_files[fd].inode <= 0) {
+        printf("___ file with fd '%d' not open\n", fd);
+        osErrno = E_BAD_FD;
+        return -1;
+    }
+    //close file
+    open_files[fd].inode = 0;
+    printf("___ file with fd '%d' closed successfully\n");
     return 0;
+
 }
 
 int
