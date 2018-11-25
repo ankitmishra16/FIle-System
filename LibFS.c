@@ -105,6 +105,59 @@ static void initialize_bitmap() {
         Disk_Write( 4, bitmap_buffer ); // sector bitmap
 }
 
+//function to return first unused bit from bitmap, which starts from sector 'start', 
+//spanned over 'num' number of sectors, and total size of bitmap 'nbits'
+static int first_unused_bit( int start, int num, int nbytes )
+{
+    nbits*=8;
+    char buf[ SECTOR_SIZE ];
+    int sector = 0;
+    int bytes_left = nbytes, check = SECTOR_SIZE;
+
+    int rt;//to return the serial number of bit which is 0
+
+    while( sector < num )// to check number of sectors on which bitmap is spanned
+    {
+        Disk_Read( start + sector*SECTOR_SIZE, buf);
+
+        if( bytes_left < SECTOR_SIZE )//to check if remaining bitmap bytes are less than sector 
+            check = bytes_left;       //then set check to that so that that much bytes would be checked only
+
+        for( int i = 0; i < check; i++ )
+        {
+            char byte_buffer = buf[i];
+
+            if( byte_buffer != (char)255 )
+            {
+                unsigned char mask = ~byte_buffer;//bitwise complement
+
+                int loc = 0;//to track the location where is first 0
+
+                while( mask != 0 )
+                {
+                    loc++;
+                    mask>>1;
+                }
+
+                mask = pow(2, loc - 1);
+
+                buf[i] = buf[i] | mask ;
+
+                Disk_Write( start + sector*SECTOR_SIZE, buf );
+
+                return (sector * SECTOR_SIZE * 8) + (i*8) + (8 - loc );//( full sectors) + ( bytes full in current sector) + ( bits full in current byte)
+                    //we are not adding one here because indexing starts from 0  
+            }
+        }
+
+
+        bytes_left-=SECTOR_SIZE;// SECTOR_SIZE bytes have been red 
+        sector++;// go to next sectro
+    } 
+
+    return -1;//bitmap is full
+
+}
 
 // helper function to get a specific inode_t from its inode number
 inode_t* get_inode(int child_inode) {
