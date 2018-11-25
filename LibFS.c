@@ -214,9 +214,9 @@ if(!path) {
     }
 
     parent = child;//pushing the child inode to parent, to go further in child's directory, so making it parent
-    child_inode = get_child_inode(parent, token);
+    child_inode = get_child_inode(parent, follow);
 
-    if(last_fname) strcpy(last_fname, token);
+    if(last_fname) strcpy(last_fname, follow);
   }
 
   if( child < -1 ) return -1;//some error happend
