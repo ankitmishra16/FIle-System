@@ -3,6 +3,8 @@
 //test comment vivek
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
+#include <math.h>
 #include "LibFS.h"
 #include "LibDisk.h"
 
@@ -74,6 +76,22 @@ static open_file_t open_files[MAX_OPEN_FILES];
 
 /**********************START OF HELPER FUNCTIONS***********************/
 
+
+int ipow(int base, int exp) {
+    int result = 1;
+    for (;;) //unconditional for-loop
+    {
+        if (exp & 1)
+            result *= base;
+        exp >>= 1;
+        if (!exp)
+            break;
+        base *= base;
+    }
+    return result;
+}
+
+
 // Initializing inode bitmap and sector bitmap
 //for inode 1st bit is 1 (for root) others = 0
 // for sector bitmap 255 bits arre 1 (for superblock(1), inode bitmap(1),
@@ -138,7 +156,7 @@ static int first_unused_bit( int start, int num, int nbytes )
                     mask = mask>>1;
                 }
 
-                mask = pow(2, loc - 1);
+                mask = ipow(2, loc - 1);
 
                 buf[i] = buf[i] | mask ;
 
@@ -420,11 +438,62 @@ File_Create(char *file)
     return 0;
 }
 
-int
-File_Open(char *file)
+int File_Open(char *file)
 {
-    printf("FS_Open\n");
-    return 0;
+    printf("FS_Open '%s'\n", file);
+    //first unused file descriptor
+    int fd;
+    bool found = false;
+    for(int i = 0; i < MAX_OPEN_FILES; i++) {
+       if(open_files[i].inode == 0) {
+           fd = i;
+           found = true;
+           break;
+       }
+    }
+    if(!found) {
+        printf("___ max files already open\n");
+        osErrno = E_TOO_MANY_OPEN_FILES;
+        return -1;
+    }
+
+    int child_inode;
+    follow_path(file, &child_inode, NULL); //retrieves child inode number of 'file'
+    if (child_inode == -1) {
+        printf("___ file '%s' not found\n", file);
+        osErrno = E_NO_SUCH_FILE;
+        return -1;
+    }
+    else {
+        int inode_sector = INODE_TABLE_START_SECTOR + child_inode/INODES_PER_SECTOR;
+        char buffer[SECTOR_SIZE];
+        if(Disk_Read(inode_sector, buffer) == -1) {
+            printf("___ cant read inode for file '%s' from disk sector\n");
+            osErrno = E_GENERAL;
+            return -1;
+        }
+        printf("___ disk read success, loading inode table entry for for inode from disk sector\n");
+
+        int inode_start = (inode_sector - INODE_TABLE_START_SECTOR) * INODES_PER_SECTOR;
+        int offset = child_inode - inode_start;
+        assert(offset >= 0 && offset < INODES_PER_SECTOR);
+        inode_t* child = (inode_t*) (buffer + offset* sizeof(inode_t));
+        printf("___ inode %d, size = %d, type = %d", child_inode, child->size, child->type);
+
+        if(child->type != 0) {
+            printf("___ FILE ERROR - '%s' not a file\n", file);
+            osErrno = E_GENERAL;
+            return -1;
+        }
+
+        //all correct. initialize file entries in open file table
+        open_files[fd].inode = child_inode;
+        open_files[fd].size = child->size;
+        open_files[fd].pos = 0;
+        return fd; //file descriptor returned
+
+    }
+
 }
 
 int
