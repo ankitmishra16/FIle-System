@@ -19,5 +19,24 @@ main(int argc, char *argv[])
 
     FS_Boot(path);
     FS_Sync();
+    if(File_Create("/newfile") < 0)
+        printf("cant create file\n");
+    else
+        printf("file created successfully\n");
+
+    if(Dir_Create("/dir1") < 0) {
+        printf("cant create directory\n");
+    }
+    else {
+        printf("directory created successfully\n");
+    }
+
+    if(Dir_Create("/dir1/dir2") < 0) {
+        printf("cant create directory\n");
+    }
+    else {
+        printf("directory created successfully\n");
+    }
+
     return 0;
 }

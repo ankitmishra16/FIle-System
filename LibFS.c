@@ -91,6 +91,29 @@ int ipow(int base, int exp) {
     return result;
 }
 
+//checking for valid characters
+static int valid_character(char c) {
+    int temp = (int)c; //casted to an int to compare with ascii decimal value
+
+    if((temp>=48 && temp<=57) || (temp>=65 && temp<=90) || (temp>=97 && temp<=122) || (temp>=45 && temp<=46) || temp==96)
+        return 1;
+
+    return 0; // illegal character
+}
+
+//return 1 if illegal 0 otherwise
+static int illegal_filename(char* name) {
+    if(strlen(name)>MAX_NAME-1) // check for legal file length
+        return 1;
+
+    int i;
+    for(i=0; i<strlen(name); i++) { // check for legal file name characters
+        if(valid_character(name[i])==0)
+            return 1;
+    }
+    return 0;
+}
+
 
 // Initializing inode bitmap and sector bitmap
 //for inode 1st bit is 1 (for root) others = 0
@@ -196,16 +219,19 @@ inode_t* get_inode(int child_inode) {
 static int get_child_inode(int parent_inode, char* fname)
 {
     int child_inode;//to return the inode number of child node
+    printf("parent inode = %d\n", parent_inode);
 
-    int parent_sector = INODE_TABLE_START_SECTOR + parent_inode / INODES_PER_SECTOR ;//to calculate sector of parent inode
-    int  parent_offset = parent_inode - ( parent_sector - INODE_TABLE_START_SECTOR ) * INODES_PER_SECTOR;//to calculate position of inode on current sector
+    //int parent_sector = INODE_TABLE_START_SECTOR + parent_inode / INODES_PER_SECTOR ;//to calculate sector of parent inode
+    //int  parent_offset = parent_inode - ( parent_sector - INODE_TABLE_START_SECTOR ) * INODES_PER_SECTOR;//to calculate position of inode on current sector
 
     char buf[SECTOR_SIZE];
-    Disk_Read( parent_sector, buf );//to read the sector of parent's inode
+    //Disk_Read( parent_sector, buf );//to read the sector of parent's inode
 
-    inode_t* parent = (inode_t*)( buf + ( parent_offset*sizeof(inode_t) ) );
-    printf("___ load parent inode: parent_inode address %p, %d (size=%d, type=%d)\n",parent, parent_inode, parent->size, parent->type);
+    //inode_t* parent = (inode_t*)( buf + ( parent_offset*sizeof(inode_t) ) );
+    //printf("___ load parent inode: parent_inode = %d, inode address %p, %d (size=%d, type=%d)\n",parent_inode ,parent, parent_inode, parent->size, parent->type);
 
+    inode_t* parent = get_inode(parent_inode);
+    printf("___ load parent inode: parent_inode = %d, inode address %p, %d (size=%d, type=%d)\n",parent_inode ,parent, parent_inode, parent->size, parent->type);
     if( parent->type == 0 )//0 represents file, and 1 represents directory, in parent->type
     {
         printf("___ Not a directory\n");
@@ -252,7 +278,7 @@ static int follow_path(char* path, int* last_inode, char* last_fname)
         return -1;
     }
     if(path[0] != '/') {
-        dprintf("___ '%s' not absolute path\n", path);
+        printf("___ '%s' not absolute path\n", path);
         return -1;
     }
 
@@ -320,20 +346,29 @@ int add_inode(int type, int parent_inode, char* file)
 
     memset(child_inode, 0, sizeof(inode_t) );
     child_inode->type = type;
-    if( Disk_Write( new_inode_sector, buf) < 0 ) return -1;//writing back the new inode's entry
+    if( Disk_Write( new_inode_sector, buf) < 0 ) {
+        printf("___ Disk write failed returning -1\n");
+        return -1;
+    }//writing back the new inode's entry
 
     // Retrieving parents inode to make entry
 
     memset( buf, 0, SECTOR_SIZE );//clearing buffer buf to reuse it
     int parent_inode_sector = INODE_TABLE_START_SECTOR + parent_inode/INODES_PER_SECTOR;//to calculate sector number on which the parent inode lie
-    if(Disk_Read( parent_inode_sector, buf ) < 0 ) return -1;//read the sector on which new inode lies    
+    if(Disk_Read( parent_inode_sector, buf ) < 0 ) {
+        printf("___ Disk read failed returning -1\n");
+        return -1;
+    }//read the sector on which new inode lies
 
-    sector_num = parent_inode_sector - INODE_BITMAP_START_SECTOR;//number of sectors from start on which parent inode lies
-    offset = parent_inode_number - sector_num * INODES_PER_SECTOR ;//going to byte where parent inode to be stored
+    sector_num = parent_inode_sector - INODE_TABLE_START_SECTOR;//number of sectors from start on which parent inode lies
+    offset = parent_inode - sector_num * INODES_PER_SECTOR ;//going to byte where parent inode to be stored
 
     inode_t* parent = (inode_t*)(buf + offset*sizeof(inode_t));
 
-    if( parent->type != 1 ) return -2;//Parent is not directory
+    if( parent->type != 1 ) {
+        printf("___ parent not directory returning -2\n");
+        return -2;
+    }//Parent is not directory
 
         //Calculations for  dirent_t of  directory
     int number_of_entries = parent->size;
@@ -342,7 +377,10 @@ int add_inode(int type, int parent_inode, char* file)
 
     if( ( sector_sub * DIRENTS_PER_SECTOR) == number_of_entries )// New sector is needed as rest sectors are full
     {
-        if( sector_sub == 30) return -1;//Parent directory is full with its capacity to have subdirectories/files
+        if( sector_sub == 30) {
+            printf("___ sector sub is 30 returning -1\n");
+            return -1;
+        }//Parent directory is full with its capacity to have subdirectories/files
 
         int new_sector = first_unused_bit( SECTOR_BITMAP_START_SECTOR, SECTOR_BITMAP_SECTORS, SECTOR_BITMAP_SIZE );//get the sector number for new sector
         parent->data[sector_sub] = new_sector ;//making entry in parent's inode for new sector
@@ -353,23 +391,32 @@ int add_inode(int type, int parent_inode, char* file)
     }
     else
     {
-        if( Disk_Read( parent->data[sector_sub], dirent_buf) < 0 ) return -1;
+        if( Disk_Read( parent->data[sector_sub], dirent_buf) < 0 ) {
+            printf("___ Disk read second failed returning -1\n");
+            return -1;
+        }
 
         printf("___ Sector loaded with sector number %d, for group number \n", parent->data[sector_sub], sector_sub );
     }
 
     int offset_sub = parent->size - sector_sub * DIRENTS_PER_SECTOR;//to calculate where the new entry to be made
 
-    dirent_t sub = ( dirent_t*)( dirent_buf + offset_sub * sizeof(dirent_t) );//tofetch  out the dirent structure from dirent buf
+    dirent_t* sub = ( dirent_t*)( dirent_buf + offset_sub * sizeof(dirent_t) );//tofetch  out the dirent structure from dirent buf
 
     sub->inode = child_inode_number;//to make inode entry in dirent structure
     strncpy( sub->fname, file, MAX_NAME );//to make file_name entry in dirent structre
 
-    if( Disk_Write( parent->data[sector_sub], dirent_buf) < 0 ) return -1;
+    if( Disk_Write( parent->data[sector_sub], dirent_buf) < 0 ) {
+        printf("___ Disk write second failed returning -1\n");
+        return -1;
+    }
 
     parent->size++;
 
-    if( Disk_Write( parent_inode_sector, buf) < 0 ) return -1;
+    if( Disk_Write( parent_inode_sector, buf) < 0 ) {
+        printf("___ Disk write third failed returning -1\n");
+        return -1;
+    }
 
     return 0;
 }
@@ -383,21 +430,21 @@ int create_file_or_directory(int type, char* pathname)
   int parent_inode = follow_path(pathname, &child_inode, last_fname);
   if(parent_inode >= 0) {
     if(child_inode >= 0) {
-      dprintf("... file/directory '%s' already exists, failed to create\n", pathname);
+      printf("___ file/directory '%s' already exists, failed to create\n", pathname);
       osErrno = E_CREATE;
       return -1;
     } else {
       if(add_inode(type, parent_inode, last_fname) >= 0) {
-    dprintf("... successfully created file/directory: '%s'\n", pathname);
+    printf("___ successfully created file/directory: '%s'\n", pathname);
     return 0;
       } else {
-    dprintf("... error: something wrong with adding child inode\n");
+    printf("___ error: something wrong with adding child inode\n");
     osErrno = E_CREATE;
     return -1;
       }
     }
   } else {
-    dprintf("... error: something wrong with the file/path: '%s'\n", pathname);
+    printf("___ error: something wrong with the file/path: '%s'\n", pathname);
     osErrno = E_CREATE;
     return -1;
   }
@@ -449,12 +496,15 @@ int FS_Boot(char *back_file) {
                     ((inode_t *) buffer)->size = 0;
                     ((inode_t *) buffer)->type = 1;
                 }
-                if(Disk_Write(INODE_TABLE_SECTORS + i, buffer) == -1) {
+                if(Disk_Write(INODE_TABLE_START_SECTOR + i, buffer) == -1) {
                     printf("_____ inode initialize failed\n");
                     osErrno = E_GENERAL;
                     return -1;
                 }
             }
+            inode_t* parent = get_inode(0);
+            printf("___  in load parent inode: parent_inode = %d, inode address %p, %d (size=%d, type=%d)\n",0 ,parent, 0, parent->size, parent->type);
+
             printf("____ inode table initialized\n");
 
             //saving progress
@@ -542,7 +592,7 @@ int
 File_Create(char *file)
 {
     
-    dprintf("File_Create('%s'):\n", file);
+    printf("File_Create('%s'):\n", file);
     return create_file_or_directory(0, file);
 }
 
@@ -671,7 +721,7 @@ int
 Dir_Create(char *path)
 {
     printf("Dir_Create %s\n", path);
-    return 0;
+    return create_file_or_directory(1, path);
 }
 
 int
