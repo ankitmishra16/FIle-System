@@ -115,6 +115,7 @@ static int illegal_filename(char* name) {
 }
 
 
+
 // Initializing inode bitmap and sector bitmap
 //for inode 1st bit is 1 (for root) others = 0
 // for sector bitmap 255 bits arre 1 (for superblock(1), inode bitmap(1),
@@ -342,8 +343,9 @@ int add_inode(int type, int parent_inode, char* file)
     int sector_num = new_inode_sector - INODE_TABLE_START_SECTOR;//sector from start on which new inode lies
     int offset = child_inode_number - sector_num * INODES_PER_SECTOR ;//going to byte where new inode to be stored
 
-    inode_t* child_inode = (inode_t*)(buf + offset*sizeof(inode_t)); 
-
+    inode_t* child_inode = (inode_t*)(buf + offset*sizeof(inode_t));
+    for(int i = 0 ;i<30;i++)
+        child_inode->data[i]=0;
     memset(child_inode, 0, sizeof(inode_t) );
     child_inode->type = type;
     if( Disk_Write( new_inode_sector, buf) < 0 ) {
@@ -450,6 +452,19 @@ int create_file_or_directory(int type, char* pathname)
   }
 }
 
+
+//check if file or directory 0 if directory 1 if file
+int get_path_type(char* pathname) {
+    int token;
+    char filename[MAX_NAME];
+    follow_path(pathname, &token, filename); // find the token
+
+    if(token==-1) // if token is invalid
+        return -1;
+
+    inode_t* inode = get_inode(token); // get inode of this token
+    return inode->type; // return the type of this token
+}
 
 /**********************END OF HELPER FUNCTIONS********************************/
 int FS_Boot(char *back_file) {
@@ -658,14 +673,188 @@ int
 File_Read(int fd, void *buffer, int size)
 {
     printf("FS_Read\n");
-    return 0;
+    /* YOUR CODE */
+    int remaining_bytes = size; // the bytes remaining to write
+    int initial_position = open_files[fd].pos; // initial position to start write
+    printf("___ Initial Position of pos variable is : %d\n",initial_position);
+    int start = open_files[fd].pos / SECTOR_SIZE; // current location of file pointer
+    int end = ((size+open_files[fd].pos+SECTOR_SIZE-1)/SECTOR_SIZE); // end point after write
+
+    printf("___ Start : %d  End : %d Size: %d\n",start,end,size);
+
+    // error checking
+
+    if(open_files[fd].inode < 1){ // if the file is not open
+        osErrno = E_BAD_FD;
+        return -1;
+    }
+
+
+    inode_t* inode = get_inode(open_files[fd].inode); // grab file inode
+
+    if(inode->size < size)
+    {
+        printf("...File size exceeded! \n");
+        return -1;
+    }
+
+    if(open_files[fd].pos %SECTOR_SIZE==0)
+        open_files[fd].pos = 0;
+
+    printf("___ Inode number --%d\n",open_files[fd].inode);
+    printf("___ File Inode size :: %d \n",inode->size);
+    int position = 0;
+    for(int i=start; i<end; i++) { // write everything byte by byte
+        // char data_buffer[SECTOR_SIZE];
+        char disk_buffer[SECTOR_SIZE];
+        int sector = inode->data[i];
+        printf("Sector number being read is : %d\n",sector);
+
+        if(open_files[fd].pos == 0){
+            // if all the remaining bytes don't fit in one sector
+            if(remaining_bytes >= SECTOR_SIZE){ // buffer gets as much as possible
+                Disk_Read(sector, disk_buffer);
+                memcpy((buffer+position),disk_buffer,SECTOR_SIZE);
+                position += SECTOR_SIZE;
+                printf("___ Full sector:: %d %.*s\n", sector, SECTOR_SIZE, disk_buffer);
+                remaining_bytes -= SECTOR_SIZE;
+            } else{ // buffer gets everything
+                Disk_Read(sector, disk_buffer);
+
+                memcpy((buffer+position),disk_buffer,remaining_bytes);
+                position += remaining_bytes;
+                printf("remaining_bytes:: %d %.*s\n", sector, remaining_bytes, disk_buffer);
+                remaining_bytes = 0;
+            }
+            // write data to sector
+        } else{
+            Disk_Read(sector, disk_buffer);
+            // printf("File pointer from middle:: %s",disk_buffer);
+            position += open_files[fd].pos%SECTOR_SIZE;
+            printf("From the middle:: %d :: %d  :: %.*s\n", sector, position,SECTOR_SIZE-position, disk_buffer+position);
+            memcpy((buffer+position), disk_buffer, SECTOR_SIZE-open_files[fd].size);
+
+            remaining_bytes -= SECTOR_SIZE-open_files[fd].pos;
+
+            open_files[fd].pos = 0;
+        }
+    }
+
+    File_Seek(fd,size);
+
+    printf("My buffer%s\n",buffer );
+
+
+    return -1;
 }
 
 int
 File_Write(int fd, void *buffer, int size)
 {
     printf("FS_Write\n");
-    return 0;
+    int remaining_bytes = size; // the bytes remaining to write
+    int initial_position = open_files[fd].pos; // initial position to start write
+    // dprintf("\nInitial Position of pos variable is : %d\n",initial_position);
+    int start = open_files[fd].pos / SECTOR_SIZE; // current location of file pointer
+    int end = ((size+open_files[fd].pos+SECTOR_SIZE-1)/SECTOR_SIZE); // end point after write
+
+
+    // error checking
+    if(fd<0 && fd>MAX_OPEN_FILES) { // not enough space on the disk
+        osErrno = E_NO_SPACE;
+        return -1;
+    } else if(open_files[fd].inode < 1){ // if the file is not open
+        osErrno = E_BAD_FD;
+        return -1;
+    } else if(end > 29){ // file exceeds maximum file size
+        osErrno = E_FILE_TOO_BIG;
+        return -1;
+    }
+
+    inode_t* inode = get_inode(open_files[fd].inode); // grab file inode
+
+    printf("___ Start : %d  End : %d Size: %d\n",start,end,inode->size);
+
+    int i;
+
+    int child_inode = open_files[fd].inode;
+
+    int inode_sector = INODE_TABLE_START_SECTOR+child_inode/INODES_PER_SECTOR;
+    char inode_buffer[SECTOR_SIZE];
+    if(Disk_Read(inode_sector, inode_buffer) < 0) return -1;
+
+    // get the child inode
+    int inode_start_entry = (inode_sector-INODE_TABLE_START_SECTOR)*INODES_PER_SECTOR;
+    int offset = child_inode-inode_start_entry;
+    assert(0 <= offset && offset < INODES_PER_SECTOR);
+    inode_t* child = (inode_t*)(inode_buffer+offset*sizeof(inode_t));
+
+
+    for(i=start; i<end; i++) { // write everything byte by byte
+        // char data_buffer[SECTOR_SIZE];
+        char disk_buffer[SECTOR_SIZE];
+        char disk_data[2000];
+        int sector = inode->data[i];
+
+
+        if(sector==0) // find location where the information should be stored
+        {
+            sector = first_unused_bit(SECTOR_BITMAP_START_SECTOR, SECTOR_BITMAP_SECTORS, SECTOR_BITMAP_SIZE);
+            inode->data[i]= sector;
+            child->data[i]=sector;
+            printf("___ Sector number to be written at is : %d\n",inode->data[i]);
+            open_files[fd].pos = 0;
+        }
+
+        if(open_files[fd].pos == 0){
+            // if all the remaining bytes don't fit in one sector
+
+            // sector = bitmap_first_unused(SECTOR_BITMAP_START_SECTOR, SECTOR_BITMAP_SECTORS, SECTOR_BITMAP_SIZE);
+            // inode->data[i]= sector;
+            // child->data[i]=sector;
+
+            if(remaining_bytes >= SECTOR_SIZE){ // buffer gets as much as possible
+                memcpy(disk_buffer, (buffer + i*SECTOR_SIZE), SECTOR_SIZE);
+
+                remaining_bytes -= SECTOR_SIZE;
+            } else{ // buffer gets everything
+                memcpy(disk_buffer, (buffer + i*SECTOR_SIZE), remaining_bytes);
+                remaining_bytes = 0;
+            }
+            printf("___ XXXXXSector Number to which data is written :: %d\n",sector);
+            printf("___ Data written :: %s\n",disk_buffer);
+
+            Disk_Write(sector, disk_buffer); // write data to sector
+            Disk_Read(sector, disk_data);
+        } else{
+            Disk_Read(sector, disk_buffer);
+            memcpy(disk_buffer, (disk_buffer+open_files[fd].size), SECTOR_SIZE-open_files[fd].size);
+            Disk_Write(sector, disk_buffer);
+            printf("___ Data written :: %s\n",disk_buffer);
+            remaining_bytes -= SECTOR_SIZE-open_files[fd].size;
+            open_files[fd].pos = 0;
+        }
+
+    }
+    //  printf("Inode number --%d\n",open_files[fd].inode);
+    // for(i=0;i<30;i++)
+    //  printf(":: %d  ",inode->data[i]);
+    // printf("\n");
+
+
+    inode->size = initial_position+size;
+    open_files[fd].pos = initial_position+size; // move end file pointer to the end
+    open_files[fd].size = initial_position+size;
+    // load the disk sector containing the child inode
+
+    // update the new child inode and write to disk
+
+    child->size = initial_position+size;
+    printf("%d\n",child->size);
+    if(Disk_Write(inode_sector, inode_buffer) < 0) return -1;
+    printf("... update child inode %d (size=%d, type=%d), update disk sector %d\n",
+            child_inode, child->size, child->type, inode_sector);
+    return size;
 }
 
 int File_Seek(int fd, int offset)
@@ -728,14 +917,73 @@ int
 Dir_Size(char *path)
 {
     printf("Dir_Size\n");
-    return 0;
+    int byte_counter = 0;
+    if(get_path_type(path)==1) { // if this is a directory
+        int token;
+        char filename[MAX_NAME];
+        follow_path(path, &token, filename); // find the location of token
+        inode_t* directory_inode = get_inode(token); // get the inode of token
+
+        printf("___ Inode Number received is : %d\n",token );
+        int i;
+        for(i=0; i<30; i++){ // for all 30 allocated data blocks per file
+            int sector = directory_inode->data[i]; // grab data from inode
+            char sector_buffer[SECTOR_SIZE];
+            Disk_Read(sector, sector_buffer); // save data onto sector_buffer
+
+            int j;
+            for(j=0; j<25; j++){
+                dirent_t* entry = (dirent_t*)(sector_buffer + (j*20)); // multiplied by 20 because each entry contains 16-byte names + 4-byte integer inode numbers
+                if(entry->inode>0)
+                    byte_counter+=20; // each entry is 20 bytes
+            }
+        }
+        printf("___ Byte Counter1 : %d\n", byte_counter);
+        return byte_counter; // return total byte count
+    }
+    printf("___ Byte Counter2 : %d\n", byte_counter);
+    return 0; // files do not have any bytes referred to by path
 }
 
 int
 Dir_Read(char *path, void *buffer, int size)
 {
     printf("Dir_Read\n");
-    return 0;
+    int byte_counter = 0;
+    if(get_path_type(path)==1) {
+        int token;
+        char filename[MAX_NAME];
+        follow_path(path, &token, filename); // find location of token
+
+        int directory_size = Dir_Size(path);
+        printf("___ directory size: %d\n", directory_size);
+
+        if(size < directory_size) { // size cannot contain all entries
+            osErrno = E_BUFFER_TOO_SMALL;
+            return -1;
+        }
+
+        printf("___ \t%-15s\t%-s\n", "NAME", "INODE");
+        inode_t* inode = get_inode(token);
+        if(inode->type == 1){ // if it's a directory
+            int i;
+            for(i=0; i<30; i++) { // for all 30 allocated data blocks per file
+                int sector =inode->data[i];
+                char sector_buffer[SECTOR_SIZE];
+                Disk_Read(sector, sector_buffer);
+
+                int j;
+                for(j=0; j<25; j++) {
+                    dirent_t* entry = (dirent_t*)(sector_buffer + (j*20));
+
+                    if(entry->inode > 0)
+                        printf("___ %-4d\t%-15s\t%-d\n", j, entry->fname, entry->inode);
+                }
+            }
+        }
+        return byte_counter;
+    }
+    return -1;
 }
 
 int
