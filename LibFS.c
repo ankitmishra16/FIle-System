@@ -220,19 +220,19 @@ inode_t* get_inode(int child_inode) {
 static int get_child_inode(int parent_inode, char* fname)
 {
     int child_inode;//to return the inode number of child node
-    printf("parent inode = %d\n", parent_inode);
+    printf("___ parent inode = %d\n", parent_inode);
 
-    //int parent_sector = INODE_TABLE_START_SECTOR + parent_inode / INODES_PER_SECTOR ;//to calculate sector of parent inode
-    //int  parent_offset = parent_inode - ( parent_sector - INODE_TABLE_START_SECTOR ) * INODES_PER_SECTOR;//to calculate position of inode on current sector
+    int parent_sector = INODE_TABLE_START_SECTOR + parent_inode / INODES_PER_SECTOR ;//to calculate sector of parent inode
+    int  parent_offset = parent_inode - ( parent_sector - INODE_TABLE_START_SECTOR ) * INODES_PER_SECTOR;//to calculate position of inode on current sector
 
     char buf[SECTOR_SIZE];
-    //Disk_Read( parent_sector, buf );//to read the sector of parent's inode
+    Disk_Read( parent_sector, buf );//to read the sector of parent's inode
 
-    //inode_t* parent = (inode_t*)( buf + ( parent_offset*sizeof(inode_t) ) );
-    //printf("___ load parent inode: parent_inode = %d, inode address %p, %d (size=%d, type=%d)\n",parent_inode ,parent, parent_inode, parent->size, parent->type);
-
-    inode_t* parent = get_inode(parent_inode);
+    inode_t* parent = (inode_t*)( buf + ( parent_offset*sizeof(inode_t) ) );
     printf("___ load parent inode: parent_inode = %d, inode address %p, %d (size=%d, type=%d)\n",parent_inode ,parent, parent_inode, parent->size, parent->type);
+
+    //inode_t* parent = get_inode(parent_inode);
+    //printf("___ load parent inode: parent_inode = %d, inode address %p, %d (size=%d, type=%d)\n",parent_inode ,parent, parent_inode, parent->size, parent->type);
     if( parent->type == 0 )//0 represents file, and 1 represents directory, in parent->type
     {
         printf("___ Not a directory\n");
@@ -254,7 +254,7 @@ static int get_child_inode(int parent_inode, char* fname)
                 if(!strcmp(((dirent_t*)buf)[i].fname, fname))
                 {
                     child_inode = ((dirent_t*)buf)[i].inode;
-                    printf("___ found child inode %d", child_inode);
+                    printf("___ found child inode %d\n", child_inode);
 
                     return child_inode;
                 }
@@ -453,6 +453,89 @@ int create_file_or_directory(int type, char* pathname)
 }
 
 
+// helper function to unlink the file from the parent node
+int unlink_helper(int parent_inode,int child_inode) {
+    char inode_buffer[SECTOR_SIZE];
+    int inode_sector = INODE_TABLE_START_SECTOR+parent_inode/INODES_PER_SECTOR;
+    if(Disk_Read(inode_sector, inode_buffer) < 0) return -1;
+    printf("___ load inode table for parent inode %d from disk sector %d\n",
+            parent_inode, inode_sector);
+
+    // parent inode
+    int inode_start_entry = (inode_sector-INODE_TABLE_START_SECTOR)*INODES_PER_SECTOR;
+    int offset = parent_inode-inode_start_entry;
+    assert(0 <= offset && offset < INODES_PER_SECTOR);
+    inode_t* parent = (inode_t*)(inode_buffer+offset*sizeof(inode_t));
+    printf("___ get parent inode %d (size=%d, type=%d)\n",
+            parent_inode, parent->size, parent->type);
+
+    if(parent->size > 0)
+        parent->size--;
+    if(Disk_Write(inode_sector, inode_buffer) < 0) return -1;
+    printf("___ update parent inode on disk sector %d\n", inode_sector);
+
+    int i;
+    for(i = 0; i < 30; i++) {
+        int sector_data = parent->data[i];
+        char sector_buffer[SECTOR_SIZE];
+
+        Disk_Read(sector_data, sector_buffer);
+
+        int j;
+        for(j = 0; j < 25; j++){
+            dirent_t * entry = (dirent_t*)(sector_buffer + (j*20)); //get all the data from the sector
+
+            if(entry->inode == child_inode){
+                memset(entry, 0, sizeof(dirent_t));
+                Disk_Write(sector_data, sector_buffer);
+                return 0;
+            }
+        }
+    }
+    return -1; // error when unlinking
+}
+
+
+// reset 'num_bit'th bit with 'num' sectors starting at 'start' sector
+//0 = success -1 = failure
+static int reset_bitmap(int start, int num, int num_bit) {
+
+    int max_bits = SECTOR_SIZE * 8;
+    int temp_bit = num_bit - 1;
+    int bit_num = temp_bit%max_bits; // bit location on "last" sector
+    int sector_location = (temp_bit/max_bits) + start; // temp_bit/max_bits is always going to be 0??
+
+    if(num_bit > max_bits)
+        return -1; // ibit is not in scope
+
+    printf("num value: %d\n", num);
+    printf("max_bits values: %d\n", max_bits);
+    printf("start value from bitmap_reset: %d\n", start);
+    printf("sector location from bitmap_reset: %d\n", sector_location);
+
+    if(bit_num==0) {
+        sector_location -= 1;
+        bit_num = max_bits;
+    }
+
+
+    char buffer[SECTOR_SIZE];
+    Disk_Read(sector_location, buffer);
+
+    int byte_location = bit_num/8;
+    int bit_location = bit_num%8;
+
+    int temp_buffer = buffer[byte_location];
+    int mask = 255 - ipow(2, 7-bit_location);
+
+    buffer[byte_location] = temp_buffer & mask;
+    Disk_Write(sector_location, buffer);
+
+    return 0;
+
+}
+
+
 //check if file or directory 0 if directory 1 if file
 int get_path_type(char* pathname) {
     int token;
@@ -465,6 +548,37 @@ int get_path_type(char* pathname) {
     inode_t* inode = get_inode(token); // get inode of this token
     return inode->type; // return the type of this token
 }
+
+
+int remove_inode(int type, int parent_inode, int child_inode) {
+
+    //for file
+    if(type == 0) {
+        char buffer[SECTOR_SIZE];
+        inode_t* file = get_inode(child_inode);
+
+        for(int i = 0; i < 30; i++) {
+            int file_sector = (unsigned char) file->data[i];
+
+            if(file_sector != 0) {
+                memset(buffer, 0, SECTOR_SIZE);
+                Disk_Write(file_sector, buffer);
+                reset_bitmap(2, 3, file_sector + 1);
+            }
+        }
+
+        reset_bitmap(1, 1, child_inode);
+        unlink_helper(parent_inode, child_inode);
+        return 0; //success
+    }
+    //directory
+    if (type == 1) {
+        unlink_helper(parent_inode, child_inode);
+        return 0; //success
+    }
+
+}
+
 
 /**********************END OF HELPER FUNCTIONS********************************/
 int FS_Boot(char *back_file) {
@@ -897,11 +1011,33 @@ int File_Close(int fd)
 
 }
 
-int
-File_Unlink(char *file)
+int File_Unlink(char *file)
 {
     printf("FS_Unlink\n");
-    return 0;
+    int child_inode;
+    char filename[MAX_NAME];
+    int parent_inode = follow_path(file, &child_inode, filename); // finds the parent
+
+    if(child_inode < 1){ // if file does not exist
+        osErrno = E_NO_SUCH_FILE;
+        return -1; // file is not deleted
+    }
+    bool is_open = false;
+    for (int i = 0; i < MAX_OPEN_FILES; i++) {
+        if(open_files[i].inode == child_inode) {
+            is_open = true;
+            break;
+        }
+    }
+    if(is_open){ // if file is in use
+        osErrno = E_FILE_IN_USE;
+        return -1; // file is not deleted
+    }
+    if(remove_inode(0, parent_inode, child_inode) >= 0){ // file can be deleted
+        return 0;
+    }
+    osErrno = E_GENERAL;
+    return -1;
 }
 
 
@@ -990,5 +1126,27 @@ int
 Dir_Unlink(char *path)
 {
     printf("Dir_Unlink\n");
-    return 0;
+    if(!strcmp(path, "/") != 0) { // directory does not exist
+        osErrno = E_GENERAL;
+        return -1;
+    }
+    else if (strcmp(path, "/") == 0) { // can't unlink the root
+        osErrno = E_ROOT_DIR;
+        return -1;
+    }
+    else if(get_path_type(path) == 1) { // if path is a directory
+        int token;
+        char filename[MAX_NAME];
+        int parent_inode = follow_path(path, &token, filename);
+
+        inode_t* inode = get_inode(token); // get inode of token
+        if(inode->size > 0){ // there are still files within the directory
+            osErrno = E_DIR_NOT_EMPTY;
+            return -1;
+        }
+        else if(remove_inode(1, parent_inode, token) >= 0){ // all clear; remove directory
+            return 0;
+        }
+    }
+    return -1;
 }
